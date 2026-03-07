@@ -797,6 +797,18 @@ impl Connector for CursorConnector {
                 continue;
             }
 
+            // When changed_paths is available, skip this root if no .vscdb
+            // files under it have changed.
+            if let Some(changed) = ctx.changed_files_under(&root) {
+                if !changed.iter().any(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n == "state.vscdb")
+                }) {
+                    continue;
+                }
+            }
+
             let db_files = Self::find_db_files(&root);
 
             for db_path in db_files {

@@ -323,7 +323,14 @@ impl Connector for OpenClawConnector {
 
             let agent_directory = Self::agent_directory_from_sessions_root(&root);
             let agent_slug = Self::agent_slug_for_directory(&agent_directory);
-            let files = Self::session_files(&root);
+            let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&root) {
+                changed.into_iter()
+                    .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("jsonl"))
+                    .map(|p| p.to_path_buf())
+                    .collect()
+            } else {
+                Self::session_files(&root)
+            };
             let mut agent_file_count = 0usize;
             let mut agent_session_count = 0usize;
             let mut agent_error_count = 0usize;

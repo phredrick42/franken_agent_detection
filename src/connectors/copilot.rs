@@ -961,7 +961,18 @@ impl Connector for CopilotConnector {
         let mut all_conversations = Vec::new();
 
         for root in roots {
-            let files = Self::find_conversation_files(&root);
+            let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&root) {
+                changed.into_iter()
+                    .filter(|p| {
+                        p.extension()
+                            .and_then(|e| e.to_str())
+                            .is_some_and(|e| e == "json" || e == "jsonl")
+                    })
+                    .map(|p| p.to_path_buf())
+                    .collect()
+            } else {
+                Self::find_conversation_files(&root)
+            };
             tracing::debug!(
                 root = %root.display(),
                 file_count = files.len(),

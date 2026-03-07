@@ -216,8 +216,33 @@ impl Connector for AiderConnector {
             return Ok(Vec::new());
         }
 
-        let root_refs: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
-        let files = Self::find_chat_files(&root_refs);
+        let files: Vec<PathBuf> = {
+            // Try changed_paths optimization: collect changed .aider.chat.history.md
+            // files across all roots. If any root lacks changed_paths info (returns
+            // None), fall back to full traversal for all roots.
+            let mut changed_files: Option<Vec<PathBuf>> = Some(Vec::new());
+            for root in &roots {
+                if let Some(ref mut acc) = changed_files {
+                    if let Some(changed) = ctx.changed_files_under(root) {
+                        acc.extend(
+                            changed.into_iter()
+                                .filter(|p| {
+                                    p.file_name()
+                                        .and_then(|n| n.to_str())
+                                        .is_some_and(|n| n == ".aider.chat.history.md")
+                                })
+                                .map(|p| p.to_path_buf()),
+                        );
+                    } else {
+                        changed_files = None;
+                    }
+                }
+            }
+            changed_files.unwrap_or_else(|| {
+                let root_refs: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+                Self::find_chat_files(&root_refs)
+            })
+        };
 
         let mut conversations = Vec::new();
         for path in files {

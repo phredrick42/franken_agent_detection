@@ -513,6 +513,11 @@ impl Connector for ChatGptConnector {
                 continue;
             }
 
+            // When changed_paths is available, filter the full base dir to only
+            // files with conversation-relevant extensions, then skip traversal for
+            // any conversation directory that has no changed files.
+            let changed_under_base = ctx.changed_files_under(&base);
+
             let conv_dirs = Self::find_conversation_dirs(&base);
 
             for (dir_path, is_encrypted) in conv_dirs {
@@ -526,7 +531,20 @@ impl Connector for ChatGptConnector {
                 }
 
                 // Walk through conversation files
-                for path in Self::conversation_files(&dir_path) {
+                let conv_files: Vec<PathBuf> = if let Some(ref changed) = changed_under_base {
+                    changed.iter()
+                        .filter(|p| {
+                            p.starts_with(&dir_path)
+                                && p.extension()
+                                    .and_then(|e| e.to_str())
+                                    .is_some_and(|e| e == "json" || e == "data")
+                        })
+                        .map(|p| p.to_path_buf())
+                        .collect()
+                } else {
+                    Self::conversation_files(&dir_path)
+                };
+                for path in conv_files {
                     // Skip files not modified since last scan
                     if !file_modified_since(&path, ctx.since_ts) {
                         continue;

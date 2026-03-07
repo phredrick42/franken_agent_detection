@@ -474,17 +474,26 @@ impl Connector for OpenCodeConnector {
         };
 
         if let Some(db) = db_path {
-            match Self::extract_from_sqlite(&db, ctx.since_ts) {
-                Ok(sqlite_convs) => {
-                    tracing::debug!(
-                        "opencode sqlite: found {} sessions in {}",
-                        sqlite_convs.len(),
-                        db.display()
-                    );
-                    convs.extend(sqlite_convs);
-                }
-                Err(e) => {
-                    tracing::debug!("opencode sqlite: failed to read {}: {e}", db.display());
+            // When changed_paths is available, skip SQLite extraction if the
+            // database file itself hasn't changed.
+            let db_changed = match ctx.changed_files_under(db.parent().unwrap_or(db.as_path())) {
+                Some(changed) => changed.iter().any(|p| *p == db),
+                None => true, // full-scan mode
+            };
+
+            if db_changed {
+                match Self::extract_from_sqlite(&db, ctx.since_ts) {
+                    Ok(sqlite_convs) => {
+                        tracing::debug!(
+                            "opencode sqlite: found {} sessions in {}",
+                            sqlite_convs.len(),
+                            db.display()
+                        );
+                        convs.extend(sqlite_convs);
+                    }
+                    Err(e) => {
+                        tracing::debug!("opencode sqlite: failed to read {}: {e}", db.display());
+                    }
                 }
             }
         }
@@ -518,6 +527,16 @@ impl Connector for OpenCodeConnector {
 
         if !session_dir.exists() {
             return Ok(convs);
+        }
+
+        // When changed_paths is available, skip the entire JSON storage scan if
+        // no files under the storage root have changed. We cannot narrow to just
+        // session/ files because a change in message/ or part/ also means a
+        // session needs re-indexing (session_has_updates checks across all three).
+        if let Some(changed) = ctx.changed_files_under(&storage_root) {
+            if changed.is_empty() {
+                return Ok(convs);
+            }
         }
 
         // Collect all session files

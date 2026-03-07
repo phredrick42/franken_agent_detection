@@ -187,7 +187,17 @@ impl Connector for PiAgentConnector {
             home = home.parent().unwrap_or(&home).to_path_buf();
         }
 
-        let files = Self::session_files(&home);
+        let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&home) {
+            changed.into_iter()
+                .filter(|p| {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    name.ends_with(".jsonl") && name.contains('_')
+                })
+                .map(|p| p.to_path_buf())
+                .collect()
+        } else {
+            Self::session_files(&home)
+        };
         let mut convs = Vec::new();
 
         for file in files {

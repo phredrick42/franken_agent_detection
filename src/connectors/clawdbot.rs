@@ -108,7 +108,14 @@ impl Connector for ClawdbotConnector {
                 root = root.parent().unwrap_or(&root).to_path_buf();
             }
 
-            let files = Self::session_files(&root);
+            let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&root) {
+                changed.into_iter()
+                    .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("jsonl"))
+                    .map(|p| p.to_path_buf())
+                    .collect()
+            } else {
+                Self::session_files(&root)
+            };
             for file in files {
                 if !file_modified_since(&file, ctx.since_ts) {
                     continue;
