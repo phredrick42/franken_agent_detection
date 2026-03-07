@@ -267,7 +267,10 @@ fn parse_kimi_session(path: &Path) -> Result<Option<NormalizedConversation>> {
     for line_res in reader.lines() {
         let line = match line_res {
             Ok(l) => l,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!("skipping unreadable JSONL line: {e}");
+                continue;
+            }
         };
 
         if line.trim().is_empty() {

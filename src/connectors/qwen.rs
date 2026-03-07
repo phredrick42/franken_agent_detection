@@ -168,7 +168,10 @@ fn parse_qwen_session(path: &Path) -> Result<Option<NormalizedConversation>> {
         let role = match msg_type {
             "user" => "user".to_string(),
             "qwen" | "assistant" => "assistant".to_string(),
-            other => other.to_string(),
+            _other => {
+                // Unknown types normalized to assistant for forward compatibility
+                "assistant".to_string()
+            }
         };
 
         // Extract content (string or array)
@@ -672,6 +675,64 @@ mod tests {
         assert_eq!(convs.len(), 1);
         assert!(convs[0].messages[0].content.contains("Part A"));
         assert!(convs[0].messages[0].content.contains("Part B"));
+    }
+
+    #[test]
+    fn unknown_message_types_normalized_to_assistant() {
+        let dir = TempDir::new().unwrap();
+        let storage = create_qwen_storage(&dir);
+
+        let session_json = r#"{
+            "sessionId": "sess-unknown-types",
+            "projectHash": "proj1",
+            "startTime": "2025-11-08T23:19:10.138Z",
+            "lastUpdated": "2025-11-08T23:19:13.706Z",
+            "messages": [
+                {
+                    "id": "msg-001",
+                    "timestamp": "2025-11-08T23:19:10.138Z",
+                    "type": "system",
+                    "content": "System prompt text"
+                },
+                {
+                    "id": "msg-002",
+                    "timestamp": "2025-11-08T23:19:11.000Z",
+                    "type": "metadata",
+                    "content": "Some metadata"
+                },
+                {
+                    "id": "msg-003",
+                    "timestamp": "2025-11-08T23:19:12.000Z",
+                    "type": "user",
+                    "content": "Normal user msg"
+                },
+                {
+                    "id": "msg-004",
+                    "timestamp": "2025-11-08T23:19:13.000Z",
+                    "type": "qwen",
+                    "content": "Normal qwen msg"
+                }
+            ]
+        }"#;
+        write_session_file(
+            &storage,
+            "proj1",
+            "session-1731107950138-unknown.json",
+            session_json,
+        );
+
+        let connector = QwenConnector::new();
+        let ctx = ScanContext::local_default(storage.clone(), None);
+        let convs = connector.scan(&ctx).unwrap();
+
+        assert_eq!(convs.len(), 1);
+        assert_eq!(convs[0].messages.len(), 4);
+        // "system" and "metadata" should both be normalized to "assistant"
+        assert_eq!(convs[0].messages[0].role, "assistant");
+        assert_eq!(convs[0].messages[1].role, "assistant");
+        // Standard types preserved
+        assert_eq!(convs[0].messages[2].role, "user");
+        assert_eq!(convs[0].messages[3].role, "assistant");
     }
 
     #[test]
