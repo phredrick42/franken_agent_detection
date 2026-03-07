@@ -100,17 +100,22 @@ impl Connector for FactoryConnector {
 
         let mut convs = Vec::new();
 
-        for entry in WalkDir::new(&root).into_iter().flatten() {
-            if !entry.file_type().is_file() {
-                continue;
-            }
+        let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&root) {
+            changed.into_iter()
+                .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("jsonl"))
+                .map(|p| p.to_path_buf())
+                .collect()
+        } else {
+            WalkDir::new(&root)
+                .into_iter()
+                .flatten()
+                .filter(|e| e.file_type().is_file())
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("jsonl"))
+                .map(|e| e.path().to_path_buf())
+                .collect()
+        };
 
-            // Only process .jsonl files (skip .settings.json)
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
-                continue;
-            }
-
+        for path in &files {
             // Skip files not modified since last scan (incremental indexing)
             if !file_modified_since(path, ctx.since_ts) {
                 continue;

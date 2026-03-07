@@ -125,6 +125,12 @@ pub struct ScanContext {
 
     /// High-water mark for incremental indexing (milliseconds since epoch).
     pub since_ts: Option<i64>,
+
+    /// Pre-classified changed file paths from the filesystem watcher.
+    /// When `Some`, connectors should process only these paths instead of
+    /// traversing entire directory trees. When `None` (full scan or initial
+    /// index), connectors use their default directory traversal.
+    pub changed_paths: Option<Vec<PathBuf>>,
 }
 
 impl ScanContext {
@@ -135,6 +141,7 @@ impl ScanContext {
             data_dir,
             scan_roots: Vec::new(),
             since_ts,
+            changed_paths: None,
         }
     }
 
@@ -149,6 +156,23 @@ impl ScanContext {
             data_dir,
             scan_roots,
             since_ts,
+            changed_paths: None,
+        }
+    }
+
+    /// Create a context with explicit scan roots and pre-classified changed paths.
+    #[must_use]
+    pub fn with_roots_and_paths(
+        data_dir: PathBuf,
+        scan_roots: Vec<ScanRoot>,
+        since_ts: Option<i64>,
+        changed_paths: Option<Vec<PathBuf>>,
+    ) -> Self {
+        Self {
+            data_dir,
+            scan_roots,
+            since_ts,
+            changed_paths,
         }
     }
 
@@ -163,6 +187,19 @@ impl ScanContext {
     #[must_use]
     pub fn use_default_detection(&self) -> bool {
         self.scan_roots.is_empty()
+    }
+
+    /// Returns changed paths filtered to those under `root`, or `None` for
+    /// full-scan mode (when `changed_paths` is `None`).
+    #[must_use]
+    pub fn changed_files_under(&self, root: &std::path::Path) -> Option<Vec<&std::path::Path>> {
+        self.changed_paths.as_ref().map(|paths| {
+            paths
+                .iter()
+                .filter(|p| p.starts_with(root))
+                .map(|p| p.as_path())
+                .collect()
+        })
     }
 }
 
@@ -275,6 +312,7 @@ mod tests {
         let ctx = ScanContext::local_default(PathBuf::from("/data"), None);
         assert!(ctx.scan_roots.is_empty());
         assert!(ctx.use_default_detection());
+        assert!(ctx.changed_paths.is_none());
     }
 
     #[test]
@@ -284,5 +322,63 @@ mod tests {
         assert_eq!(ctx.scan_roots.len(), 1);
         assert!(!ctx.use_default_detection());
         assert_eq!(ctx.since_ts, Some(1000));
+        assert!(ctx.changed_paths.is_none());
+    }
+
+    #[test]
+    fn scan_context_with_roots_and_paths_sets_changed_paths() {
+        let roots = vec![ScanRoot::local(PathBuf::from("/home/.claude"))];
+        let paths = vec![
+            PathBuf::from("/home/.claude/projects/foo/session.jsonl"),
+            PathBuf::from("/home/.claude/projects/bar/session.jsonl"),
+        ];
+        let ctx = ScanContext::with_roots_and_paths(
+            PathBuf::from("/data"),
+            roots,
+            Some(1000),
+            Some(paths.clone()),
+        );
+        assert_eq!(ctx.changed_paths.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn changed_files_under_filters_by_root() {
+        let paths = vec![
+            PathBuf::from("/home/.claude/projects/foo/session.jsonl"),
+            PathBuf::from("/home/.claude/projects/bar/session.jsonl"),
+            PathBuf::from("/home/.codex/sessions/rollout-1.jsonl"),
+        ];
+        let ctx = ScanContext::with_roots_and_paths(
+            PathBuf::from("/data"),
+            vec![],
+            None,
+            Some(paths),
+        );
+
+        let claude_files = ctx
+            .changed_files_under(std::path::Path::new("/home/.claude"))
+            .unwrap();
+        assert_eq!(claude_files.len(), 2);
+        assert!(claude_files
+            .iter()
+            .all(|p| p.starts_with("/home/.claude")));
+
+        let codex_files = ctx
+            .changed_files_under(std::path::Path::new("/home/.codex"))
+            .unwrap();
+        assert_eq!(codex_files.len(), 1);
+
+        let empty = ctx
+            .changed_files_under(std::path::Path::new("/home/.aider"))
+            .unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn changed_files_under_returns_none_in_full_scan_mode() {
+        let ctx = ScanContext::local_default(PathBuf::from("/data"), None);
+        assert!(ctx
+            .changed_files_under(std::path::Path::new("/any"))
+            .is_none());
     }
 }

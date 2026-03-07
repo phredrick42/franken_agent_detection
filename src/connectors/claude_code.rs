@@ -84,7 +84,19 @@ impl Connector for ClaudeCodeConnector {
                 continue;
             }
 
-            for path in Self::session_files(&scan_target) {
+            let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&scan_target) {
+                changed.into_iter()
+                    .filter(|p| {
+                        let ext = p.extension().and_then(|s| s.to_str());
+                        ext == Some("jsonl") || ext == Some("json") || ext == Some("claude")
+                    })
+                    .map(|p| p.to_path_buf())
+                    .collect()
+            } else {
+                Self::session_files(&scan_target)
+            };
+
+            for path in files {
                 let ext = path.extension().and_then(|s| s.to_str());
                 // Skip files not modified since last scan (incremental indexing)
                 if !file_modified_since(&path, ctx.since_ts) {

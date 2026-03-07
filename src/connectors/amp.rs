@@ -99,14 +99,22 @@ impl Connector for AmpConnector {
                 continue;
             }
 
-            for entry in WalkDir::new(&root).into_iter().flatten() {
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-                let path = entry.path();
-                if !is_amp_log_file(path) {
-                    continue;
-                }
+            let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&root) {
+                changed.into_iter()
+                    .filter(|p| is_amp_log_file(p))
+                    .map(|p| p.to_path_buf())
+                    .collect()
+            } else {
+                WalkDir::new(&root)
+                    .into_iter()
+                    .flatten()
+                    .filter(|e| e.file_type().is_file())
+                    .filter(|e| is_amp_log_file(e.path()))
+                    .map(|e| e.path().to_path_buf())
+                    .collect()
+            };
+
+            for path in &files {
                 // NOTE: We intentionally skip the file_modified_since() check for Amp.
                 // Amp does not update file mtime when new messages are added to a thread,
                 // so mtime-based incremental indexing would miss new messages.

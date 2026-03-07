@@ -226,7 +226,21 @@ impl Connector for GeminiConnector {
             return Ok(Vec::new());
         }
 
-        let files = Self::session_files(&root);
+        let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&root) {
+            changed.into_iter()
+                .filter(|p| {
+                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                    name.starts_with("session-") && name.ends_with(".json")
+                        && p.parent()
+                            .and_then(|par| par.file_name())
+                            .and_then(|n| n.to_str())
+                            == Some("chats")
+                })
+                .map(|p| p.to_path_buf())
+                .collect()
+        } else {
+            Self::session_files(&root)
+        };
         let mut convs = Vec::new();
 
         for file in files {

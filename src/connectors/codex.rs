@@ -180,7 +180,18 @@ impl Connector for CodexConnector {
                 continue;
             }
 
-            let files = Self::rollout_files(&home);
+            let files: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&home) {
+                changed.into_iter()
+                    .filter(|p| {
+                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        name.starts_with("rollout-")
+                            && (name.ends_with(".jsonl") || name.ends_with(".json"))
+                    })
+                    .map(|p| p.to_path_buf())
+                    .collect()
+            } else {
+                Self::rollout_files(&home)
+            };
 
             for file in files {
                 let source_path = file.clone();

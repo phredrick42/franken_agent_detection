@@ -126,16 +126,35 @@ impl Connector for ClineConnector {
                 continue;
             }
 
-            let entries = match fs::read_dir(&root) {
-                Ok(e) => e,
-                Err(e) => {
-                    tracing::debug!(path = %root.display(), error = %e, "cline: skipping unreadable directory");
-                    continue;
-                }
+            // Collect task directories to process. When changed_paths is available,
+            // derive the set from changed files instead of listing the entire directory.
+            let task_dirs: Vec<PathBuf> = if let Some(changed) = ctx.changed_files_under(&root) {
+                let mut dirs: Vec<PathBuf> = changed.into_iter()
+                    .filter(|p| {
+                        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                        name == "ui_messages.json" || name == "api_conversation_history.json"
+                    })
+                    .filter_map(|p| p.parent().map(|d| d.to_path_buf()))
+                    .collect();
+                dirs.sort();
+                dirs.dedup();
+                dirs
+            } else {
+                let entries = match fs::read_dir(&root) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        tracing::debug!(path = %root.display(), error = %e, "cline: skipping unreadable directory");
+                        continue;
+                    }
+                };
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+                    .collect()
             };
-            for entry in entries {
-                let Ok(entry) = entry else { continue };
-                let path = entry.path();
+
+            for path in task_dirs {
                 if !path.is_dir() {
                     continue;
                 }
